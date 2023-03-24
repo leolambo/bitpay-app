@@ -933,12 +933,20 @@ export const publishAndSign =
           return resolve(publishedTx);
         }
 
-        const signedTx: any = await signTx(
-          wallet,
-          key,
-          publishedTx || txp,
-          password,
-        );
+        publishedTx = publishedTx || txp;
+        if (wallet.chain === 'eth' && publishedTx.nonce == null) {
+          // set nonce
+          publishedTx = await wallet.setNonce({
+            address: txp.from,
+            chain: txp.chain,
+            coin: txp.coin,
+            network: wallet.network,
+            txId: txp.id,
+            isPublished: true,
+          });
+        }
+
+        const signedTx: any = await signTx(wallet, key, publishedTx, password);
         dispatch(LogActions.debug('success sign [publishAndSign]'));
         if (signedTx.status === 'accepted') {
           broadcastedTx = await broadcastTx(wallet, signedTx);
@@ -1135,6 +1143,17 @@ export const signTx = (
   return new Promise(async (resolve, reject) => {
     try {
       const rootPath = wallet.getRootPath();
+      if (wallet.chain === 'eth' && txp.nonce == null) {
+        // set nonce
+        txp = await wallet.setNonce({
+          address: txp.from,
+          chain: txp.chain,
+          coin: txp.coin,
+          network: wallet.network,
+          txId: txp.id,
+          isPublished: true,
+        });
+      }
       const signatures = key.methods!.sign(rootPath, txp, password);
       wallet.pushSignatures(
         txp,
