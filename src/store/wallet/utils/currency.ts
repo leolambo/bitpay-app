@@ -56,7 +56,7 @@ export const GetPrecision =
       tokens[currencyName]?.unitInfo
     );
   };
-
+// create isEVMCoin
 export const IsUtxoCoin = (currencyAbbreviation: string): boolean => {
   return Object.keys(BitpaySupportedUtxoCoins).includes(
     currencyAbbreviation.toLowerCase(),
