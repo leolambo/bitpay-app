@@ -8,7 +8,6 @@ import {
 } from '../styled/Containers';
 import {AssetsByChainData} from '../../navigation/wallet/screens/AccountDetails';
 import {View} from 'react-native';
-import {FlashList} from '@shopify/flash-list';
 import {H5} from '../styled/Text';
 import WalletRow, {WalletRowProps} from './WalletRow';
 import {CurrencyImage} from '../currency-image/CurrencyImage';
@@ -93,6 +92,7 @@ const AssetsByChainRow = ({
     setShowChainAssets({[chain]: !showChainAssets[chain]});
     dispatch(
       setLocalAssetsDropdown({
+        ...selectedLocalAssetsDropdown,
         [accountItem.accountAddress]: {
           ...selectedLocalAssetsDropdown?.[accountItem.accountAddress],
           [chain]: !showChainAssets[chain],
@@ -140,14 +140,9 @@ const AssetsByChainRow = ({
           </ChainAssetsContainer>
         </Column>
       </RowContainer>
-      {showChainAssets[chain] ? (
-        <FlashList<WalletRowProps>
-          estimatedItemSize={90}
-          data={chainAssetsList}
-          renderItem={memoizedRenderItem}
-          extraData={hideBalance}
-        />
-      ) : null}
+      {Object.values(chainAssetsList).map(item => {
+        return showChainAssets[chain] ? memoizedRenderItem({item}) : null;
+      })}
     </View>
   );
 };
