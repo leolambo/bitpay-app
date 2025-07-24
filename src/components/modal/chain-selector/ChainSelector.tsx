@@ -1,22 +1,15 @@
 import React, {useCallback, useMemo, memo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {DeviceEventEmitter, Platform, View} from 'react-native';
+import {DeviceEventEmitter, Platform} from 'react-native';
 import {TouchableOpacity} from '@components/base/TouchableOpacity';
 import {useTheme} from '@react-navigation/native';
-import {FlashList} from '@shopify/flash-list';
+import {BottomSheetFlashList as FlashList} from '@gorhom/bottom-sheet';
 import styled, {css} from 'styled-components/native';
 import {useDispatch, useSelector} from 'react-redux';
 import {BaseText, H4, TextAlign} from '../../styled/Text';
 import {AppActions} from '../../../store/app';
 import {RootState} from '../../../store';
-import {
-  Black,
-  Action,
-  SlateDark,
-  White,
-  Slate,
-  LightBlack,
-} from '../../../styles/colors';
+import {Black, Action, SlateDark, White, Slate} from '../../../styles/colors';
 import haptic from '../../haptic-feedback/haptic';
 
 import {
@@ -49,7 +42,7 @@ import debounce from 'lodash.debounce';
 import {SearchIconContainer} from '../../chain-search/ChainSearch';
 import {sleep} from '../../../utils/helper-methods';
 import {DeviceEmitterEvents} from '../../../constants/device-emitter-events';
-import BaseModal from '../../modal/base/BaseModal';
+import SheetModal from '../base/sheet/SheetModal';
 
 export const ignoreGlobalListContextList = [
   'sell',
@@ -78,6 +71,7 @@ interface HideableViewProps {
 
 const HideableView = styled.View<HideableViewProps>`
   display: ${({show}) => (show ? 'flex' : 'none')};
+  flex: 1;
 `;
 
 const ListHeader = styled(BaseText)`
@@ -119,10 +113,8 @@ const ImageContainer = styled.View`
   margin-right: 3px;
 `;
 
-const KeyBoardAvoidingViewWrapper = styled.KeyboardAvoidingView`
-  background: ${({theme: {dark}}) => (dark ? LightBlack : White)};
-  border-top-left-radius: 12px;
-  border-top-right-radius: 12px;
+const ChainSelectorContainer = styled.View`
+  flex: 1;
 `;
 
 const ChainSelectorModal = () => {
@@ -288,14 +280,16 @@ const ChainSelectorModal = () => {
       .filter((chain): chain is string => chain !== null);
     setSearchResults(results);
   }, 300);
-
+  const modalHeight = Math.min(600, HEIGHT - 150);
+  const modalHeightPercentage = modalHeight / HEIGHT;
   return (
-    <BaseModal
-      accessibilityLabel="network-selector"
-      id={'sheetModal'}
+    <SheetModal
+      modalLibrary="bottom-sheet"
+      height={Math.floor(modalHeightPercentage * HEIGHT)}
+      snapPoints={[`${Math.floor(modalHeightPercentage * 100)}%`]}
+      stackBehavior="push"
       isVisible={isVisible}
-      backdropTransitionOutTiming={0}
-      hideModalContentWhileAnimating
+      borderRadius={Platform.OS === 'ios' ? 12 : 0}
       backdropOpacity={0.4}
       onBackdropPress={async () => {
         dispatch(AppActions.dismissChainSelectorModal());
@@ -306,82 +300,68 @@ const ChainSelectorModal = () => {
         if (onBackdropDismiss) {
           onBackdropDismiss();
         }
-      }}
-      animationIn={'slideInUp'}
-      animationOut={'slideOutDown'}
-      useNativeDriverForBackdrop={true}
-      useNativeDriver={false}
-      style={{
-        position: 'relative',
-        justifyContent: 'flex-end',
-        margin: 0,
       }}>
-      <KeyBoardAvoidingViewWrapper
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={{maxHeight: '75%', minHeight: 350}}>
-          <WalletSelectMenuHeaderContainer>
-            <TextAlign align={'left'}>
-              <H4>{t('Select Network')}</H4>
-            </TextAlign>
-          </WalletSelectMenuHeaderContainer>
-          <Header>
-            <SearchRoundContainer>
-              <SearchIconContainer>
-                <SearchSvg height={16} width={16} />
-              </SearchIconContainer>
-              <SearchRoundInput
-                placeholder={'Search Networks'}
-                placeholderTextColor={theme.dark ? Slate : Slate}
-                onChangeText={(text: string) => {
-                  updateSearchResults(text);
-                }}
-              />
-            </SearchRoundContainer>
-          </Header>
-          <HideableView show={!!searchVal} style={{flex: 1}}>
-            {searchResults.length ? (
-              <FlashList
-                contentContainerStyle={{paddingBottom: 80}}
-                data={searchResults}
-                estimatedItemSize={65}
-                // @ts-ignore
-                renderItem={renderChainItem}
-                keyExtractor={(item, index) => index.toString()}
-              />
-            ) : (
-              <NoResultsContainer>
-                <NoResultsImgContainer>
-                  <GhostSvg style={{marginTop: 20}} />
-                </NoResultsImgContainer>
-                <NoResultsDescription>
-                  {t("We couldn't find a match for ")}
-                  <BaseText style={{fontWeight: 'bold'}}>{searchVal}</BaseText>.
-                </NoResultsDescription>
-              </NoResultsContainer>
-            )}
-          </HideableView>
-
-          <HideableView
-            show={!searchVal}
-            style={{minHeight: Math.min(450, HEIGHT / 1.5)}}>
+      <ChainSelectorContainer>
+        <WalletSelectMenuHeaderContainer>
+          <TextAlign align={'left'}>
+            <H4>{t('Select Network')}</H4>
+          </TextAlign>
+        </WalletSelectMenuHeaderContainer>
+        <Header>
+          <SearchRoundContainer>
+            <SearchIconContainer>
+              <SearchSvg height={16} width={16} />
+            </SearchIconContainer>
+            <SearchRoundInput
+              placeholder={'Search Networks'}
+              placeholderTextColor={theme.dark ? Slate : Slate}
+              onChangeText={(text: string) => {
+                updateSearchResults(text);
+              }}
+            />
+          </SearchRoundContainer>
+        </Header>
+        <HideableView show={!!searchVal}>
+          {searchResults.length ? (
             <FlashList
               contentContainerStyle={{paddingBottom: 80}}
-              data={chainList}
-              renderItem={({item, index}) => {
-                if (item.title) {
-                  return <ListHeader>{item.title}</ListHeader>;
-                } else {
-                  return renderChainItem({item, index});
-                }
-              }}
+              data={searchResults}
               estimatedItemSize={65}
+              // @ts-ignore
+              renderItem={renderChainItem}
               keyExtractor={(item, index) => index.toString()}
-              getItemType={item => (item.title ? 'sectionHeader' : 'row')}
             />
-          </HideableView>
-        </View>
-      </KeyBoardAvoidingViewWrapper>
-    </BaseModal>
+          ) : (
+            <NoResultsContainer>
+              <NoResultsImgContainer>
+                <GhostSvg style={{marginTop: 20}} />
+              </NoResultsImgContainer>
+              <NoResultsDescription>
+                {t("We couldn't find a match for ")}
+                <BaseText style={{fontWeight: 'bold'}}>{searchVal}</BaseText>.
+              </NoResultsDescription>
+            </NoResultsContainer>
+          )}
+        </HideableView>
+
+        <HideableView show={!searchVal}>
+          <FlashList
+            contentContainerStyle={{paddingBottom: 80}}
+            data={chainList}
+            renderItem={({item, index}) => {
+              if (item.title) {
+                return <ListHeader>{item.title}</ListHeader>;
+              } else {
+                return renderChainItem({item, index});
+              }
+            }}
+            estimatedItemSize={65}
+            keyExtractor={(item, index) => index.toString()}
+            getItemType={item => (item.title ? 'sectionHeader' : 'row')}
+          />
+        </HideableView>
+      </ChainSelectorContainer>
+    </SheetModal>
   );
 };
 

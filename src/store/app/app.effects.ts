@@ -48,6 +48,7 @@ import {LogActions} from '../log';
 import {WalletActions} from '../wallet';
 import {
   startMigration,
+  startAddEDDSAKey,
   startWalletStoreInit,
   startGetRates,
 } from '../wallet/effects';
@@ -60,6 +61,7 @@ import {
   setConfirmedTxAccepted,
   setEmailNotificationsAccepted,
   setMigrationComplete,
+  setEDDSAKeyMigrationComplete,
   setNotificationsAccepted,
   setUserFeedback,
   showBlur,
@@ -169,7 +171,7 @@ export const startAppInit = (): Effect => async (dispatch, getState) => {
     dispatch(LogActions.debug(`Network: ${network}`));
     dispatch(LogActions.debug(`Theme: ${colorScheme || 'system'}`));
 
-    const {migrationComplete} = APP;
+    const {migrationComplete, EDDSAKeyMigrationComplete} = APP;
     const {customTokensMigrationComplete, polygonMigrationComplete} = WALLET;
     // init analytics -> post onboarding or migration
     dispatch(initAnalytics());
@@ -218,6 +220,12 @@ export const startAppInit = (): Effect => async (dispatch, getState) => {
       await dispatch(startMigration());
       dispatch(setMigrationComplete());
       dispatch(LogActions.info('success [setMigrationComplete]'));
+    }
+
+    if (!EDDSAKeyMigrationComplete) {
+      await dispatch(startAddEDDSAKey());
+      dispatch(setEDDSAKeyMigrationComplete());
+      dispatch(LogActions.info('success [setEDDSAKeyMigrationComplete]'));
     }
 
     if (!polygonMigrationComplete) {
@@ -463,6 +471,14 @@ export const initializeBrazeContent = (): Effect => (dispatch, getState) => {
     contentCardSubscription = Braze.addListener(
       Braze.Events.CONTENT_CARDS_UPDATED,
       async (update: Braze.ContentCardsUpdatedEvent) => {
+        if (Analytics.isMergingUser()) {
+          dispatch(
+            LogActions.debug(
+              'Skipping Braze content cards update during user merge.',
+            ),
+          );
+          return;
+        }
         const contentCards = update.cards;
         const isInitializing = currentRetry < MAX_RETRIES;
 
@@ -554,6 +570,12 @@ const createBrazeEid = (): Effect<string | undefined> => dispatch => {
  * @returns void
  */
 export const requestBrazeContentRefresh = (): Effect => async dispatch => {
+  if (Analytics.isMergingUser()) {
+    dispatch(
+      LogActions.debug('Skipping Braze content refresh during user merge.'),
+    );
+    return;
+  }
   try {
     dispatch(LogActions.info('Refreshing Braze content...'));
 
@@ -593,7 +615,7 @@ export const startOnGoingProcessModal =
       ADDING_WALLET: i18n.t('Adding Wallet'),
       ADDING_ACCOUNT: i18n.t('Adding Account-Based Wallet'),
       ADDING_EVM_CHAINS: i18n.t('Adding EVM Chains'),
-      ADDING_SPL_CHAINS: i18n.t('Adding SPL Chains'),
+      ADDING_SPL_CHAINS: i18n.t('Adding Solana Account'),
       LOADING: i18n.t('Loading'),
       FETCHING_PAYMENT_OPTIONS: i18n.t('Fetching payment options...'),
       FETCHING_PAYMENT_INFO: i18n.t('Fetching payment information...'),
@@ -1329,6 +1351,13 @@ export const incomingLink =
           dispatch(CardEffects.startOpenDosh());
         });
       }
+    } else if (pathSegments[0] === 'exchange-rate') {
+      handler = () => {
+        navigationRef.navigate(RootStacks.TABS, {
+          screen: TabsScreens.HOME,
+          params,
+        });
+      };
     }
 
     if (handler) {

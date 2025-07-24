@@ -40,10 +40,21 @@ export const startGetTokenOptions =
           tokens = data;
         } catch (error) {
           dispatch(
-            LogActions.info('failed - continue anyway [startGetTokenOptions]'),
+            LogActions.info(
+              `request: ${BASE_BWS_URL}/v1/service/oneInch/getTokens/${chain} failed - continue anyway [startGetTokenOptions]`,
+            ),
           );
         }
-        Object.values(tokens).forEach(token => {
+        if (!Array.isArray(tokens)) {
+          dispatch(
+            LogActions.error(
+              `Unexpected response [startGetTokenOptions]: ${tokens}`,
+            ),
+          );
+          return;
+        }
+
+        tokens.forEach(token => {
           if (
             BitpaySupportedTokens[getCurrencyAbbreviation(token.address, chain)]
           ) {

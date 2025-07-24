@@ -1,13 +1,16 @@
-import {
-  useNavigation,
-  useScrollToTop,
-  useTheme,
-} from '@react-navigation/native';
-import {each, filter} from 'lodash';
+import {useScrollToTop, useTheme} from '@react-navigation/native';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {RefreshControl, ScrollView} from 'react-native';
-import {STATIC_CONTENT_CARDS_ENABLED} from '../../../constants/config';
+import {
+  AppState,
+  AppStateStatus,
+  RefreshControl,
+  ScrollView,
+} from 'react-native';
+import {
+  EXCHANGE_RATES_SORT_ORDER,
+  STATIC_CONTENT_CARDS_ENABLED,
+} from '../../../constants/config';
 import {SupportedCurrencyOptions} from '../../../constants/SupportedCurrencyOptions';
 import {
   setShowKeyMigrationFailureModal,
@@ -25,6 +28,7 @@ import {updatePortfolioBalance} from '../../../store/wallet/wallet.actions';
 import {SlateDark, White} from '../../../styles/colors';
 import {
   calculatePercentageDifference,
+  getCurrencyAbbreviation,
   sleep,
 } from '../../../utils/helper-methods';
 import {
@@ -61,11 +65,22 @@ import {Analytics} from '../../../store/analytics/analytics.effects';
 import {withErrorFallback} from '../TabScreenErrorFallback';
 import TabContainer from '../TabContainer';
 import ArchaxFooter from '../../../components/archax/archax-footer';
+import {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {TabsScreens, TabsStackParamList} from '../TabsStack';
+import {
+  BitpaySupportedCoins,
+  BitpaySupportedTokens,
+} from '../../../constants/currencies';
 
-const HomeRoot = () => {
+export type HomeScreenProps = NativeStackScreenProps<
+  TabsStackParamList,
+  TabsScreens.HOME
+>;
+
+const HomeRoot: React.FC<HomeScreenProps> = ({route, navigation}) => {
   const {t} = useTranslation();
   const dispatch = useAppDispatch();
-  const navigation = useNavigation();
+  const {currencyAbbreviation} = route.params || {};
   const theme = useTheme();
   const themeType = useThemeType();
   const [refreshing, setRefreshing] = useState(false);
@@ -114,9 +129,9 @@ const HomeRoot = () => {
   // Exchange Rates
   const lastDayRates = useAppSelector(({RATE}) => RATE.lastDayRates);
   const rates = useAppSelector(({RATE}) => RATE.rates);
-  const memoizedExchangeRates: Array<ExchangeRateItemProps> = useMemo(
-    () =>
-      Object.entries(lastDayRates).reduce((ratesList, [key, lastDayRate]) => {
+  const memoizedExchangeRates: Array<ExchangeRateItemProps> = useMemo(() => {
+    const result = Object.entries(lastDayRates).reduce(
+      (ratesList, [key, lastDayRate]) => {
         const lastDayRateForDefaultCurrency = lastDayRate.find(
           ({code}) => code === defaultAltCurrency.isoCode,
         );
@@ -127,41 +142,74 @@ const HomeRoot = () => {
           ({currencyAbbreviation}) => currencyAbbreviation === key,
         );
 
-        if (
-          option &&
-          lastDayRateForDefaultCurrency?.rate &&
-          rateForDefaultCurrency?.rate &&
-          rateForDefaultCurrency.rate !== 1
-        ) {
-          const {
-            id,
-            img,
-            currencyName,
-            currencyAbbreviation,
-            chain,
-            tokenAddress,
-          } = option;
-
-          const percentChange = calculatePercentageDifference(
-            rateForDefaultCurrency.rate,
-            lastDayRateForDefaultCurrency.rate,
+        if (option && option.chain && option.currencyAbbreviation) {
+          const currencyName = getCurrencyAbbreviation(
+            option?.tokenAddress
+              ? option?.tokenAddress
+              : option?.currencyAbbreviation,
+            option?.chain,
           );
+          const isStableCoin =
+            BitpaySupportedCoins[currencyName]?.properties?.isStableCoin ||
+            BitpaySupportedTokens[currencyName]?.properties?.isStableCoin;
 
-          ratesList.push({
-            id,
-            img,
-            currencyName,
-            currencyAbbreviation,
-            chain: chain ? chain : currencyAbbreviation,
-            tokenAddress: tokenAddress,
-            average: percentChange,
-            currentPrice: rateForDefaultCurrency.rate,
-          });
+          if (
+            option &&
+            lastDayRateForDefaultCurrency?.rate &&
+            rateForDefaultCurrency?.rate &&
+            !isStableCoin
+          ) {
+            const {
+              id,
+              img,
+              currencyName,
+              currencyAbbreviation,
+              chain,
+              tokenAddress,
+            } = option;
+
+            const percentChange = calculatePercentageDifference(
+              rateForDefaultCurrency.rate,
+              lastDayRateForDefaultCurrency.rate,
+            );
+
+            ratesList.push({
+              id,
+              img,
+              currencyName,
+              currencyAbbreviation,
+              chain: chain ? chain : currencyAbbreviation,
+              tokenAddress: tokenAddress,
+              average: percentChange,
+              currentPrice: rateForDefaultCurrency.rate,
+            });
+          }
         }
         return ratesList;
-      }, [] as ExchangeRateItemProps[]),
-    [lastDayRates, rates, defaultAltCurrency],
-  );
+      },
+      [] as ExchangeRateItemProps[],
+    );
+
+    return result.sort((a, b) => {
+      const indexA = EXCHANGE_RATES_SORT_ORDER.indexOf(
+        a.currencyAbbreviation.toLowerCase(),
+      );
+      const indexB = EXCHANGE_RATES_SORT_ORDER.indexOf(
+        b.currencyAbbreviation.toLowerCase(),
+      );
+
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      if (indexA !== -1) {
+        return -1;
+      }
+      if (indexB !== -1) {
+        return 1;
+      }
+      return a.currencyName.localeCompare(b.currencyName);
+    });
+  }, [lastDayRates, rates, defaultAltCurrency]);
 
   // Quick Links
   const memoizedQuickLinks = useMemo(() => {
@@ -215,6 +263,30 @@ const HomeRoot = () => {
 
   const scrollViewRef = useRef<ScrollView>(null);
   useScrollToTop(scrollViewRef);
+
+  useEffect(() => {
+    function onAppStateChange(status: AppStateStatus) {
+      if (status === 'active' && currencyAbbreviation) {
+        navigation.setParams({
+          currencyAbbreviation: undefined,
+        });
+        const exchangeRatesSection = memoizedExchangeRates.find(
+          ({currencyAbbreviation: abbr}) =>
+            abbr.toLowerCase() === currencyAbbreviation.toLowerCase(),
+        );
+        if (exchangeRatesSection) {
+          navigation.navigate('PriceCharts', {item: exchangeRatesSection});
+        }
+      }
+    }
+
+    const subscriptionAppStateChange = AppState.addEventListener(
+      'change',
+      onAppStateChange,
+    );
+
+    return () => subscriptionAppStateChange.remove();
+  }, [currencyAbbreviation]);
 
   return (
     <TabContainer>

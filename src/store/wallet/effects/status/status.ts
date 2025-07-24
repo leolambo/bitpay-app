@@ -38,6 +38,7 @@ import {LogActions} from '../../../log';
 import _ from 'lodash';
 import {createWalletAddress} from '../address/address';
 import {detectAndCreateTokensForEachEvmWallet} from '../create/create';
+import uniqBy from 'lodash.uniqby';
 
 /*
  * post broadcasting of payment
@@ -399,7 +400,7 @@ export const updateKeyStatus =
           singleAddress: boolean;
         }> = [];
 
-        const balances = key.wallets.map(wallet => {
+        const balances = uniqBy(key.wallets, 'id').map(wallet => {
           const {balance: cachedBalance, pendingTxps} = wallet;
 
           if (!bulkStatus) {
@@ -905,7 +906,7 @@ export const buildBalance =
     let satTotalAmount = totalAmount;
     let satLockedAmount = lockedAmount;
 
-    if (['xrp'].includes(chain)) {
+    if (['xrp', 'sol'].includes(chain)) {
       satLockedAmount = lockedAmount - lockedConfirmedAmount;
       satTotalAmount = totalAmount - lockedConfirmedAmount;
     }

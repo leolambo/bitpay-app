@@ -21,7 +21,10 @@ import haptic from '../../../components/haptic-feedback/haptic';
 import {SlateDark, White} from '../../../styles/colors';
 import ToggleSwitch from '../../../components/toggle-switch/ToggleSwitch';
 import {useAppDispatch, useAppSelector} from '../../../utils/hooks';
-import {findWalletById} from '../../../store/wallet/utils/wallet';
+import {
+  checkPrivateKeyEncrypted,
+  findWalletById,
+} from '../../../store/wallet/utils/wallet';
 import {Wallet} from '../../../store/wallet/wallet.models';
 import {AppActions} from '../../../store/app';
 import {sleep} from '../../../utils/helper-methods';
@@ -42,6 +45,7 @@ import {
 import {useTranslation} from 'react-i18next';
 import {IsVMChain} from '../../../store/wallet/utils/currency';
 import {TouchableOpacity} from '@components/base/TouchableOpacity';
+import {Constants} from 'bitcore-wallet-client/ts_build/lib/common';
 
 const WalletSettingsContainer = styled.SafeAreaView`
   flex: 1;
@@ -137,10 +141,17 @@ const WalletSettings = () => {
     return {
       onSubmitHandler: async (encryptPassword: string) => {
         try {
-          const decryptedKey = key.methods!.get(encryptPassword);
+          const combinedKey: any = {};
+          Object.values(Constants.ALGOS).forEach(algo => {
+            const keyData = key.methods!.get(encryptPassword, algo);
+            if (algo === 'EDDSA') {
+              keyData.xPrivKeyEDDSA = keyData.xPrivKey;
+            }
+            Object.assign(combinedKey, keyData);
+          });
           dispatch(AppActions.dismissDecryptPasswordModal());
           await sleep(300);
-          cta(decryptedKey);
+          cta(combinedKey);
         } catch (e) {
           console.log(`Decrypt Error: ${e}`);
           await dispatch(AppActions.dismissDecryptPasswordModal());
@@ -294,7 +305,7 @@ const WalletSettings = () => {
                     use0forBCH,
                     use44forMultisig,
                   };
-                  if (key.methods!.isPrivKeyEncrypted()) {
+                  if (checkPrivateKeyEncrypted(key)) {
                     dispatch(
                       showDecryptPasswordModal(
                         buildEncryptModalConfig(async decryptedKey => {
@@ -306,9 +317,17 @@ const WalletSettings = () => {
                       ),
                     );
                   } else {
+                    const combinedKey: any = {};
+                    Object.values(Constants.ALGOS).forEach(algo => {
+                      const keyData = key.methods!.get(undefined, algo);
+                      if (algo === 'EDDSA') {
+                        keyData.xPrivKeyEDDSA = keyData.xPrivKey;
+                      }
+                      Object.assign(combinedKey, keyData);
+                    });
                     navigation.navigate('ExportWallet', {
                       wallet,
-                      keyObj: {...key.methods!.get(), ..._keyObj},
+                      keyObj: {...combinedKey, ..._keyObj},
                     });
                   }
                 }}>

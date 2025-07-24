@@ -16,6 +16,7 @@ import {
   Linking,
   NativeEventEmitter,
   NativeModules,
+  Platform,
   StatusBar,
 } from 'react-native';
 import 'react-native-gesture-handler';
@@ -110,7 +111,6 @@ import {
   createWalletsForAccounts,
   fixWalletAddresses,
   getEvmGasWallets,
-  getSvmGasWallets,
   sleep,
 } from './utils/helper-methods';
 import {Analytics} from './store/analytics/analytics.effects';
@@ -156,6 +156,7 @@ import {
   getBaseEVMAccountCreationCoinsAndTokens,
   getBaseSVMAccountCreationCoinsAndTokens,
 } from './constants/currencies';
+import Logger from 'bitcore-wallet-client/ts_build/lib/log';
 
 const {Timer, SilentPushEvent, InAppMessageModule} = NativeModules;
 
@@ -472,6 +473,7 @@ export default () => {
         }
       }
     }
+
     const subscriptionAppStateChange = AppState.addEventListener(
       'change',
       onAppStateChange,
@@ -498,6 +500,7 @@ export default () => {
       );
       dispatch(handleBwsEvent(response));
     }
+
     const eventEmitter = new NativeEventEmitter(SilentPushEvent);
     eventEmitter.addListener('SilentPushNotification', onMessageReceived);
     return () => DeviceEventEmitter.removeAllListeners('inAppMessageReceived');
@@ -540,18 +543,34 @@ export default () => {
     );
 
     return () => subscriptionAppStateChange.remove();
-  }, [pinLockActive, biometricLockActive]);
+  }, [pinLockActive, biometricLockActive, onboardingCompleted]);
 
   useEffect(() => {
     const eventBrazeListener = DeviceEventEmitter.addListener(
       DeviceEmitterEvents.SHOULD_DELETE_BRAZE_USER,
-      async eid => {
-        // Wait for a few seconds to ensure the user is deleted
+      async ({oldEid, newEid, agreedToMarketingCommunications}) => {
         await sleep(20000);
-        LogActions.info('Deleting old user EID: ', eid);
-        await BrazeWrapper.delete(eid);
-        await sleep(3000);
-        BrazeWrapper.endMergingUser();
+        LogActions.info('Deleting old user EID: ', oldEid);
+        await BrazeWrapper.delete(oldEid);
+        // Wait for a few seconds to ensure the user is deleted
+        await sleep(5000);
+        Analytics.endMergingUser();
+        await sleep(5000);
+        LogActions.info(
+          'Updating Email Notification Subscription to new EID: ',
+          newEid,
+          agreedToMarketingCommunications,
+        );
+        Braze.setEmailNotificationSubscriptionType(
+          agreedToMarketingCommunications
+            ? Braze.NotificationSubscriptionTypes.OPTED_IN
+            : Braze.NotificationSubscriptionTypes.SUBSCRIBED,
+        );
+        dispatch(
+          AppEffects.setAnnouncementsNotifications(
+            agreedToMarketingCommunications,
+          ),
+        );
       },
     );
 
@@ -578,6 +597,31 @@ export default () => {
     return () => subscriptionAppStateChange.remove();
   }, [rerender, appColorScheme]);
 
+  // Patch BWC logger to forward logs to the debug screen.
+  // Note: BWC logs full request bodies — we filter long messages to avoid clutter.
+  useEffect(() => {
+    const patchLogger = (loggerInstance: Record<string, any>) => {
+      ['debug', 'info', 'log', 'warn', 'error', 'fatal'].forEach(level => {
+        loggerInstance[level] = (...args: any[]) => {
+          try {
+            const message = args
+              .map(arg => (typeof arg === 'string' ? arg : JSON.stringify(arg)))
+              .join(' ');
+            if (message.length < 800) {
+              const logLevel = level === 'fatal' ? 'error' : level;
+              dispatch(
+                (LogActions as Record<string, Function>)[logLevel](
+                  `[BWC] ${message}`,
+                ),
+              );
+            }
+          } catch (_) {}
+        };
+      });
+    };
+    patchLogger(Logger);
+  }, []);
+
   const scheme = appColorScheme || Appearance.getColorScheme();
   const theme = scheme === 'dark' ? BitPayDarkTheme : BitPayLightTheme;
 
@@ -600,7 +644,13 @@ export default () => {
       <ThemeProvider theme={theme}>
         <GestureHandlerRootView style={{flex: 1}}>
           <BottomSheetModalProvider>
-            <SafeAreaView style={{flex: 1}}>
+            <SafeAreaView
+              style={{flex: 1}}
+              edges={
+                Platform.OS === 'android'
+                  ? ['left', 'right', 'bottom']
+                  : undefined
+              }>
               {showArchaxBanner && <ArchaxBanner />}
               {/* https://github.com/react-navigation/react-navigation/issues/11353#issuecomment-1548114655 */}
               <HeaderShownContext.Provider value>
@@ -718,7 +768,7 @@ export default () => {
                       }
                     };
 
-                    // we need to ensure that each svm account has all supported wallets attached.
+                    // we need to ensure that for each key we have equal svm wallets attached.
                     const runCompleteSvmWalletsAccountFix = async () => {
                       try {
                         if (Object.keys(keys).length === 0) {
@@ -729,17 +779,12 @@ export default () => {
                         await sleep(1000); // give the modal time to show
                         await Promise.all(
                           Object.values(keys).map(async key => {
-                            const svmWallets = getSvmGasWallets(key.wallets);
-                            const accountsArray = [
-                              ...new Set(
-                                svmWallets.map(
-                                  wallet => wallet.credentials.account,
-                                ),
-                              ),
-                            ];
+                            if (!key?.properties?.xPrivKeyEDDSA) {
+                              return;
+                            }
                             const wallets = await createWalletsForAccounts(
                               dispatch,
-                              accountsArray,
+                              [0],
                               key.methods as KeyMethods,
                               getBaseSVMAccountCreationCoinsAndTokens(),
                             );

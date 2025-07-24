@@ -94,7 +94,7 @@ const OnGoingProcessModal: React.FC = () => {
   const isVisible = useAppSelector(({APP}) => APP.showOnGoingProcessModal);
   const appWasInit = useAppSelector(({APP}) => APP.appWasInit);
 
-  const modalLibrary: 'bottom-sheet' | 'modal' = 'bottom-sheet';
+  const modalLibrary: 'bottom-sheet' | 'modal' = 'modal';
   const bottomSheetModalRef = useRef<BottomSheetModal>(null);
   const opacityFadeDuration = 200;
   const opacity = useSharedValue(0);
@@ -184,6 +184,7 @@ const OnGoingProcessModal: React.FC = () => {
       isVisible={appWasInit && isVisible}
       backdropOpacity={0.4}
       coverScreen={true}
+      statusBarTranslucent={true}
       animationIn={'fadeInRight'}
       animationOut={'fadeOutLeft'}
       backdropTransitionOutTiming={0}
