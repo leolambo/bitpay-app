@@ -379,13 +379,19 @@ const handleUnlock =
         if (context === 'u') {
           const {
             invoice: {
+              buyerEmailAddress,
               buyerProvidedInfo: {emailAddress},
               buyerProvidedEmail,
               status,
             },
           } = invoice;
 
-          if (emailAddress || buyerProvidedEmail || status !== 'new') {
+          if (
+            emailAddress ||
+            buyerProvidedEmail ||
+            buyerEmailAddress ||
+            status !== 'new'
+          ) {
             dispatch(goToPayPro(data, undefined, undefined, wallet));
           } else {
             navigationRef.navigate('EnterBuyerProvidedEmail', {data});
@@ -595,10 +601,9 @@ const goToConfirm =
       } else {
         dispatch(dismissOnGoingProcessModal());
       }
-      const [errorMessageConfig] = await Promise.all([
-        dispatch(handleCreateTxProposalError(err)),
-        sleep(400),
-      ]);
+      const errorMessageConfig = await dispatch(
+        handleCreateTxProposalError(err),
+      );
       dispatch(
         showBottomNotificationModal({
           ...errorMessageConfig,

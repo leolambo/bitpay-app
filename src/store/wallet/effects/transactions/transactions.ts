@@ -9,7 +9,12 @@ import {FormatAmountStr} from '../amount/amount';
 import {BwcProvider} from '../../../../lib/bwc';
 import uniqBy from 'lodash.uniqby';
 import {SAFE_CONFIRMATIONS} from '../../../../constants/wallet';
-import {IsCustomERCToken, IsERCToken, IsUtxoChain} from '../../utils/currency';
+import {
+  IsCustomERCToken,
+  IsERCToken,
+  IsSVMChain,
+  IsUtxoChain,
+} from '../../utils/currency';
 import {ToAddress, ToLtcAddress} from '../address/address';
 import {
   IsDateInCurrentMonth,
@@ -172,21 +177,25 @@ const ProcessTx =
       ...customTokenOptionsByAddress,
     };
 
-    const {chain, coin, tokenAddress: payoutContractAddress} = tx;
+    const {chain, coin, tokenAddress: txpContractAddress} = tx;
     let {tokenAddress} = wallet;
-    // Only for payouts. For this case chain and coin have the same value.
+    // Only for payouts/refunds. For this case chain and coin have the same value.
     // Therefore, to identify an ERC20 token payout it is necessary to check if exist the tokenAddress field
     let tokenSymbol: string | undefined;
 
-    if (payoutContractAddress) {
-      tokenSymbol = Object.values(tokensOptsByAddress)
-        .find(
-          ({address}) =>
-            payoutContractAddress?.toLowerCase() === address?.toLowerCase(),
-        )
-        ?.symbol.toLowerCase();
-      if (tokenSymbol) {
-        tokenAddress = payoutContractAddress?.toLowerCase();
+    if (txpContractAddress) {
+      const matchedToken = Object.values(tokensOptsByAddress).find(
+        ({address}) => {
+          if (IsSVMChain(chain)) {
+            return txpContractAddress === address;
+          }
+          return txpContractAddress?.toLowerCase() === address?.toLowerCase();
+        },
+      );
+
+      if (matchedToken?.symbol) {
+        tokenSymbol = matchedToken.symbol.toLowerCase();
+        tokenAddress = txpContractAddress;
       }
     }
 
@@ -1339,11 +1348,11 @@ export const buildTransactionDetails =
         }
 
         if (!note) {
-          _transaction.detailsMemo = message;
+          _transaction.txDescription = message;
         }
 
         if (note?.body) {
-          _transaction.detailsMemo = note.body;
+          _transaction.txDescription = note.body;
         }
 
         _transaction.actionsList = GetActionsList(transaction, wallet);

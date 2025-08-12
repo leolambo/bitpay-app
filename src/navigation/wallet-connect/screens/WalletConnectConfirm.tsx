@@ -153,6 +153,12 @@ const WalletConnectConfirm = () => {
       break;
   }
 
+  // if scam ignore validation
+  if (sessionV2?.verifyContext?.verified?.isScam) {
+    bgColor = Caution25;
+    VerifyIcon = InvalidDomainSvg;
+  }
+
   const _setTxDetails = async () => {
     try {
       const {txDetails: _txDetails, txp: newTxp} = await dispatch(
@@ -167,13 +173,9 @@ const WalletConnectConfirm = () => {
       setTxDetails(_txDetails);
       setTxp(newTxp);
     } catch (err: any) {
-      const errorMessageConfig = (
-        await Promise.all([
-          dispatch(handleCreateTxProposalError(err)),
-          sleep(500),
-        ])
-      )[0];
-      await sleep(500);
+      const errorMessageConfig = await dispatch(
+        handleCreateTxProposalError(err),
+      );
       dispatch(
         showBottomNotificationModal({
           ...errorMessageConfig,

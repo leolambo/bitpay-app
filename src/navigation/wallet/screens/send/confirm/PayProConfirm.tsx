@@ -82,7 +82,7 @@ import {
   CoinbaseErrorMessages,
 } from '../../../../../api/coinbase/coinbase.types';
 import {coinbasePayInvoice} from '../../../../../store/coinbase';
-import {Memo} from './Memo';
+import {TxDescription} from './TxDescription';
 import {HIGH_FEE_LIMIT} from '../../../../../constants/wallet';
 import WarningSvg from '../../../../../../assets/img/warning.svg';
 import {
@@ -237,7 +237,9 @@ const PayProConfirm = () => {
       setRecipient({address: newTxDetails.sendingTo.recipientAddress} as {
         address: string;
       });
-      checkHighFees(selectedWallet, newTxp, fee);
+      if (fee) {
+        checkHighFees(selectedWallet, newTxp, fee);
+      }
       dispatch(
         Analytics.track('BitPay App - Start Merchant Purchase', {
           merchantBrand: invoice.merchantName,
@@ -248,15 +250,16 @@ const PayProConfirm = () => {
       dispatch(dismissOnGoingProcessModal());
       const onDismiss = () =>
         wallet ? navigation.goBack() : reshowWalletSelector();
-      const [errorConfig] = await Promise.all([
-        dispatch(handleCreateTxProposalError(err, onDismiss)),
-        sleep(500),
-      ]);
+      const errorMessageConfig = await dispatch(
+        handleCreateTxProposalError(err, onDismiss),
+      );
       dispatch(
         AppActions.showBottomNotificationModal({
-          ...errorConfig,
+          ...errorMessageConfig,
           message:
-            err.response?.data?.message || err.message || errorConfig.message,
+            err.response?.data?.message ||
+            err.message ||
+            errorMessageConfig.message,
         }),
       );
     }
@@ -278,15 +281,16 @@ const PayProConfirm = () => {
     await sleep(400);
     dispatch(dismissOnGoingProcessModal());
     const onDismiss = () => reshowWalletSelector();
-    const [errorConfig] = await Promise.all([
-      dispatch(handleCreateTxProposalError(err, onDismiss)),
-      sleep(500),
-    ]);
+    const errorMessageConfig = await dispatch(
+      handleCreateTxProposalError(err, onDismiss),
+    );
     dispatch(
       AppActions.showBottomNotificationModal({
-        ...errorConfig,
+        ...errorMessageConfig,
         message:
-          err.response?.data?.message || err.message || errorConfig.message,
+          err.response?.data?.message ||
+          err.message ||
+          errorMessageConfig.message,
       }),
     );
   };
@@ -649,8 +653,8 @@ const PayProConfirm = () => {
                 />
               ) : null}
               {txp ? (
-                <Memo
-                  memo={txp.message}
+                <TxDescription
+                  txDescription={txp.message}
                   onChange={message => updateTxp({...txp, message})}
                 />
               ) : null}

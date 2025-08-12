@@ -700,11 +700,11 @@ const WalletDetails: React.FC<WalletDetailsScreenProps> = ({route}) => {
   };
 
   const goToTransactionDetails = (transaction: any) => {
-    const onMemoChange = () => debouncedLoadHistory(true);
+    const onTxDescriptionChange = () => debouncedLoadHistory(true);
     navigation.navigate('TransactionDetails', {
       wallet: fullWalletObj,
       transaction,
-      onMemoChange,
+      onTxDescriptionChange,
     });
   };
 
@@ -786,10 +786,9 @@ const WalletDetails: React.FC<WalletDetailsScreenProps> = ({route}) => {
         speedup: true,
       });
     } catch (err: any) {
-      const [errorMessageConfig] = await Promise.all([
-        dispatch(handleCreateTxProposalError(err)),
-        sleep(400),
-      ]);
+      const errorMessageConfig = await dispatch(
+        handleCreateTxProposalError(err),
+      );
       dispatch(
         showBottomNotificationModal({
           ...errorMessageConfig,
