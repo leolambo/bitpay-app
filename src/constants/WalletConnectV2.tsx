@@ -4,6 +4,11 @@ export const WALLETCONNECT_V2_METADATA = {
   description: 'BitPay Wallet',
   url: '#',
   icons: ['https://bitpay.com/resources/content/images/2019/10/bitpay.png'],
+  redirect: {
+    native: 'bitpay://',
+    universal: 'link.bitpay.com',
+    linkMode: true,
+  },
 };
 
 export const WC_EVENTS = [
@@ -158,8 +163,13 @@ export const EIP155_SIGNING_METHODS = {
 export const SOLANA_SIGNING_METHODS = {
   SIGN_TRANSACTION: 'solana_signTransaction',
   SIGN_MESSAGE: 'solana_signMessage',
-  // SIGN_AND_SEND_TRANSACTION: 'solana_signAndSendTransaction',
+  SIGN_AND_SEND_TRANSACTION: 'solana_signAndSendTransaction',
   // SING_ALL_TRANSACTIONS: "solana_signAllTransactions",
+};
+
+export const WC_SUPPORTED_METHODS: {[key in string]: any} = {
+  ...SOLANA_SIGNING_METHODS,
+  ...EIP155_SIGNING_METHODS,
 };
 
 export const EIP155_METHODS_NOT_INTERACTION_NEEDED = [
