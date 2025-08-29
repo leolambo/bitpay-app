@@ -6,6 +6,8 @@ import {
   applyMiddleware,
   combineReducers,
   legacy_createStore as createStore,
+  Middleware,
+  StoreEnhancer,
 } from 'redux';
 import {composeWithDevTools} from 'redux-devtools-extension';
 import {createLogger} from 'redux-logger'; // https://github.com/LogRocket/redux-logger
@@ -40,6 +42,7 @@ import {
   locationReduxPersistBlackList,
 } from './location/location.reducer';
 import {logReducer, logReduxPersistBlackList} from './log/log.reducer';
+import {AddLog} from './log/log.types';
 import {shopReducer, shopReduxPersistBlackList} from './shop/shop.reducer';
 import {shopCatalogReducer} from './shop-catalog/shop-catalog.reducer';
 import {
@@ -60,6 +63,7 @@ import {
 } from './coinbase/coinbase.reducer';
 import {rateReducer, rateReduxPersistBlackList} from './rate/rate.reducer';
 import {LogActions} from './log';
+import * as initLogs from './log/initLogs';
 import {
   walletConnectReducer,
   walletConnectV2Reducer,
@@ -68,6 +72,7 @@ import {
 
 import {Storage} from 'redux-persist';
 import {MMKV} from 'react-native-mmkv';
+import {getErrorString} from '../utils/helper-methods';
 import {AppDispatch} from '../utils/hooks';
 import {
   ZenledgerReduxPersistBlackList,
@@ -76,17 +81,63 @@ import {
 
 export const storage = new MMKV();
 
+// Module-scoped logger that safely logs before and after store initialization
+let storeDispatch: ((action: AnyAction) => void) | null = null;
+const addLog = (log: AddLog) => {
+  try {
+    if (storeDispatch) {
+      storeDispatch(log);
+    } else {
+      // Fallback to initLogs buffer until store is ready
+      initLogs.add(log);
+    }
+  } catch (_) {}
+};
+
 export const reduxStorage: Storage = {
   setItem: (key, value) => {
-    storage.set(key, value);
-    return Promise.resolve(true);
+    try {
+      storage.set(key, value);
+    } catch (err) {
+      addLog(
+        LogActions.persistLog(
+          LogActions.error(
+            `MMKV setItem failed - key:${key} len:${
+              value?.length ?? 0
+            } - ${getErrorString(err)}`,
+          ),
+        ),
+      );
+    }
+    return Promise.resolve();
   },
   getItem: key => {
-    const value = storage.getString(key);
-    return Promise.resolve(value);
+    try {
+      const value = storage.getString(key);
+      return Promise.resolve(value);
+    } catch (err) {
+      addLog(
+        LogActions.persistLog(
+          LogActions.error(
+            `MMKV getItem failed - key:${key} - ${getErrorString(err)}`,
+          ),
+        ),
+      );
+      return Promise.resolve(null);
+    }
   },
   removeItem: key => {
-    storage.delete(key);
+    try {
+      storage.delete(key);
+    } catch (err) {
+      addLog(
+        LogActions.persistLog(
+          LogActions.error(
+            `MMKV removeItem failed - key:${key} - ${getErrorString(err)}`,
+          ),
+        ),
+      );
+    }
     return Promise.resolve();
   },
 };
@@ -141,7 +192,28 @@ const reducers = {
   WALLET_CONNECT_V2: walletConnectV2Reducer,
 };
 
-const rootReducer = combineReducers(reducers);
+const combinedReducer = combineReducers(reducers);
+
+// Guarded root reducer that logs reducer crashes and returns previous state
+const rootReducer = (state: any, action: AnyAction) => {
+  try {
+    return combinedReducer(state, action);
+  } catch (err: any) {
+    const crashLog = LogActions.persistLog(
+      LogActions.error(
+        `Reducer crash on action:${
+          action?.type ?? 'UNKNOWN'
+        } - ${getErrorString(err)}`,
+      ),
+    );
+    setTimeout(() => addLog(crashLog), 0);
+    // Return previous state to avoid app crash; if no state, fallback to init
+    if (state) {
+      return state;
+    }
+    return combinedReducer(undefined, {type: '@@INIT'} as AnyAction);
+  }
+};
 
 const logger = createLogger({
   predicate: (_getState, action) =>
@@ -182,7 +254,9 @@ const logger = createLogger({
 });
 
 const getStore = async () => {
-  const middlewares = [thunkMiddleware];
+  const middlewares: Middleware[] = [
+    thunkMiddleware as unknown as Middleware,
+  ];
 
   if (__DEV__ && !(DISABLE_DEVELOPMENT_LOGGING === 'true')) {
     // @ts-ignore
@@ -195,14 +269,6 @@ const getStore = async () => {
     // middlewares.push(inmmutableMiddleware);
   }
 
-  let middlewareEnhancers = applyMiddleware(...middlewares);
-
-  if (__DEV__) {
-    middlewareEnhancers = composeWithDevTools({trace: true, traceLimit: 25})(
-      middlewareEnhancers,
-    );
-  }
-
   const secretKey = await getEncryptionKey().catch(() => getUniqueId());
 
   const rootPersistConfig = {
@@ -213,16 +279,17 @@ const getStore = async () => {
       transformContacts,
       createTransform<RootState, RootState, RootState>((inboundState, key) => {
         // Clear out nested blacklisted fields before encrypting and persisting
-        if (typeof key === 'string' && reducerPersistBlackLists[key]) {
-          const reducerPersistBlackList = reducerPersistBlackLists[key];
-          const fieldOverrides = (reducerPersistBlackList as string[]).reduce(
-            (allFields, field) => ({...allFields, ...{[field]: undefined}}),
-            {},
-          );
-
-          return {...inboundState, ...fieldOverrides};
+        if (typeof key === 'string') {
+          const reducerPersistBlackList =
+            reducerPersistBlackLists[key as keyof typeof reducers];
+          if (reducerPersistBlackList?.length) {
+            const fieldOverrides = reducerPersistBlackList.reduce(
+              (all, field) => ({...all, [field]: undefined}),
+              {},
+            );
+            return {...inboundState, ...fieldOverrides};
+          }
         }
-
         return inboundState;
       }),
       encryptSpecificFields(secretKey),
@@ -245,7 +312,75 @@ const getStore = async () => {
 
   // @ts-ignore
   const persistedReducer = persistReducer(rootPersistConfig, rootReducer);
+  // Persist lifecycle logging middleware
+  const persistLifecycleLogger = (): Middleware => {
+    let persistStartTs: number | null = null;
+    let firstRehydrateLogged = false;
+    return store => next => (action: AnyAction) => {
+      if (action && typeof action.type === 'string') {
+        if (action.type === 'persist/PERSIST') {
+          persistStartTs = Date.now();
+          try {
+            const keysCount = storage.getAllKeys().length;
+            store.dispatch(
+              LogActions.info(
+                `persist/PERSIST start - storageKeys:${keysCount}`,
+              ),
+            );
+          } catch (_) {}
+        } else if (
+          action.type === 'persist/REHYDRATE' &&
+          !firstRehydrateLogged
+        ) {
+          firstRehydrateLogged = true;
+          const took = persistStartTs ? Date.now() - persistStartTs : -1;
+          try {
+            const payload = action?.payload || {};
+            const totalSize = (() => {
+              try {
+                return JSON.stringify(payload).length;
+              } catch (_) {
+                return -1;
+              }
+            })();
+            const sizeByReduxKey: Record<string, number> = {};
+            try {
+              Object.keys(payload).forEach(k => {
+                try {
+                  sizeByReduxKey[k] = JSON.stringify(payload[k]).length;
+                } catch (_) {}
+              });
+            } catch (_) {}
+            store.dispatch(
+              LogActions.info(
+                `persist/REHYDRATE complete - durationMs:${took} totalSize:${totalSize} sizeByReduxKey:${JSON.stringify(
+                  sizeByReduxKey,
+                )}`,
+              ),
+            );
+          } catch (_) {}
+        }
+      }
+      return next(action);
+    };
+  };
+
+  middlewares.push(persistLifecycleLogger());
+
+  const middlewareEnhancers = __DEV__
+    ? composeWithDevTools({trace: true, traceLimit: 25})(
+        applyMiddleware(...middlewares),
+      )
+    : applyMiddleware(...middlewares);
+
   const store = createStore(persistedReducer, undefined, middlewareEnhancers);
+  // Enable direct log dispatching now that the store exists
+  storeDispatch = store.dispatch;
+
+  // Clear any stale logs, and immediately flush any initLogs that were added before the store was initialized
+  storeDispatch(LogActions.clear());
+  initLogs.drainAndDispatch(storeDispatch);
+
   const persistor = persistStore(store);
 
   if (__DEV__) {
@@ -286,19 +421,52 @@ export function configureTestStore(initialState: any) {
 export async function getEncryptionKey(): Promise<string> {
   const encryptionKeyId = 'bitpay-app-encryption-key';
 
-  const existingKey = await Keychain.getGenericPassword({
-    service: encryptionKeyId,
-  });
+  try {
+    initLogs.add(
+      LogActions.info('getEncryptionKey: attempting to retrieve from Keychain'),
+    );
+    const existingKey = await Keychain.getGenericPassword({
+      service: encryptionKeyId,
+    });
 
-  if (existingKey && existingKey.password) {
-    return existingKey.password;
+    if (existingKey && existingKey.password) {
+      initLogs.add(
+        LogActions.info('getEncryptionKey: found existing key in Keychain'),
+      );
+      return existingKey.password;
+    }
+  } catch (err) {
+    initLogs.add(
+      LogActions.persistLog(
+        LogActions.error(
+          `getEncryptionKey: Keychain get failed - ${getErrorString(err)}`,
+        ),
+      ),
+    );
   }
 
+  initLogs.add(
+    LogActions.warn('getEncryptionKey: generating new key (no existing key)'),
+  );
   const newKey = getUniqueId();
-  // Save to keychain
-  await Keychain.setGenericPassword(encryptionKeyId, newKey, {
-    service: encryptionKeyId,
-  });
+
+  try {
+    // Save to keychain
+    await Keychain.setGenericPassword(encryptionKeyId, newKey, {
+      service: encryptionKeyId,
+    });
+    initLogs.add(
+      LogActions.info('getEncryptionKey: stored new key in Keychain'),
+    );
+  } catch (err) {
+    initLogs.add(
+      LogActions.persistLog(
+        LogActions.error(
+          `getEncryptionKey: Keychain set failed - ${getErrorString(err)}`,
+        ),
+      ),
+    );
+  }
 
   return newKey;
 }
